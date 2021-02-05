@@ -1,5 +1,6 @@
 import torch
-import numpy as np
+import math
+#import numpy as np
 
 def arange_sequence(ranges):
     """
@@ -14,7 +15,7 @@ def arange_sequence(ranges):
     return complete_ranges[complete_ranges < ranges.unsqueeze(-1)]
 
 
-def dist_matrix(d1, d2, is_normalized=False):
+def dist_matrix(d1: torch.Tensor, d2: torch.Tensor, is_normalized: bool=False) -> torch.Tensor:
     if is_normalized:
         return 2 - 2.0 * d1 @ d2.t()
     x_norm = (d1 ** 2).sum(1).view(-1, 1)
@@ -44,13 +45,13 @@ def piecewise_arange(piecewise_idxer):
     # print(counts)
     maxcnt = torch.max(counts).item()
     numuni = uni.shape[0]
-    tmp = torch.zeros(size=(numuni, maxcnt), device=dv).bool()
+    tmp = torch.zeros(size=(numuni, int(maxcnt)), dtype=torch.bool)
     ranges = torch.arange(maxcnt, device=dv).unsqueeze(0).expand(numuni, -1)
     tmp[ranges < counts.unsqueeze(-1)] = True
     return ranges[tmp]
 
 
-def batch_2x2_inv(m, check_dets=False):
+def batch_2x2_inv(m: torch.Tensor, check_dets: bool=False):
     a = m[..., 0, 0]
     b = m[..., 0, 1]
     c = m[..., 1, 0]
@@ -107,16 +108,15 @@ def batch_2x2_ellipse(m):
     return eigenvals, eigenvecs
 
 
-def draw_first_k_couples(k, rdims, dv):
+def draw_first_k_couples(k: int, rdims: torch.Tensor):
     # exhaustive search over the first n samples:
     # n(n+1)/2 = n2/2 + n/2 couples
     # max n for which we can exhaustively sample with k couples:
     # n2/2 + n/2 = k
     # n = sqrt(1/4 + 2k)-1/2 = (sqrt(8k+1)-1)/2
-    max_exhaustive_search = int(np.sqrt(2*k + 0.25) - 0.5)
+    max_exhaustive_search = int(math.sqrt(2*k + 0.25) - 0.5)
     residual_search = k - max_exhaustive_search*(max_exhaustive_search + 1)/2
-    repeats = torch.tensor(np.concatenate([np.arange(max_exhaustive_search) + 1, [residual_search]]),
-                           dtype=torch.long, device=dv)
+    repeats = torch.cat([torch.arange(max_exhaustive_search) + 1, torch.tensor([residual_search])]).long()
     idx_sequence = torch.stack([repeats.repeat_interleave(repeats), arange_sequence(repeats)], dim=-1)
     return torch.remainder(idx_sequence.unsqueeze(-1), rdims)
 

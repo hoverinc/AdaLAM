@@ -1,10 +1,13 @@
-from .ransac import ransac
-from .utils import dist_matrix, orientation_diff
-import numpy as np
+from typing import Tuple
+import math
+
 import torch
 
+from .ransac import ransac
+from .utils import dist_matrix, orientation_diff
 
-def select_seeds(dist1, R1, scores1, n1, fnn12, mnn):
+@torch.jit.script
+def select_seeds(dist1: torch.Tensor, R1: float, scores1: torch.Tensor, n1: int, fnn12: torch.Tensor, mnn: torch.Tensor):
     im1neighmap = dist1 < R1 ** 2  # (n1, n1)
     # find out who scores higher than whom
     im1scorescomp = scores1.unsqueeze(1) > scores1.unsqueeze(0)  # (n1, n1)
@@ -19,23 +22,24 @@ def select_seeds(dist1, R1, scores1, n1, fnn12, mnn):
     im2seeds = fnn12[im1bs]  # (n1bs) index format
     return im1seeds, im2seeds
 
-
-def extract_neighborhood_sets(o1, o2, s1, s2, dist1, im1seeds, im2seeds, k1, k2, R1, R2, fnn12, ORIENTATION_THR,
-                              SCALE_RATE_THR, SEARCH_EXP, MIN_INLIERS):
+@torch.jit.script
+def extract_neighborhood_sets(dist1: torch.Tensor, im1seeds: torch.Tensor, im2seeds: torch.Tensor,
+                              k1: torch.Tensor, k2: torch.Tensor, R1: float, R2: float, fnn12: torch.Tensor,
+                              SEARCH_EXP: int, MIN_INLIERS: int):
     dst1 = dist1[im1seeds, :]
     dst2 = dist_matrix(k2[fnn12[im1seeds]], k2[fnn12])
     local_neighs_mask = (dst1 < (SEARCH_EXP * R1) ** 2) \
                         & (dst2 < (SEARCH_EXP * R2) ** 2)
 
-    if ORIENTATION_THR is not None and ORIENTATION_THR < 180:
-        relo = orientation_diff(o1, o2[fnn12])
-        orientation_diffs = torch.abs(orientation_diff(relo.unsqueeze(0), relo[im1seeds].unsqueeze(1)))
-        local_neighs_mask = local_neighs_mask & (orientation_diffs < ORIENTATION_THR)
-    if SCALE_RATE_THR is not None and SCALE_RATE_THR < 10:
-        rels = s2[fnn12] / s1
-        scale_rates = rels[im1seeds].unsqueeze(1) / rels.unsqueeze(0)
-        local_neighs_mask = local_neighs_mask & (scale_rates < SCALE_RATE_THR) \
-                            & (scale_rates > 1 / SCALE_RATE_THR)  # (ns, n1)
+    #if ORIENTATION_THR is not None and ORIENTATION_THR < 180:
+    #    relo = orientation_diff(o1, o2[fnn12])
+    #    orientation_diffs = torch.abs(orientation_diff(relo.unsqueeze(0), relo[im1seeds].unsqueeze(1)))
+    #    local_neighs_mask = local_neighs_mask & (orientation_diffs < ORIENTATION_THR)
+    #if SCALE_RATE_THR is not None and SCALE_RATE_THR < 10:
+    #    rels = s2[fnn12] / s1
+    #    scale_rates = rels[im1seeds].unsqueeze(1) / rels.unsqueeze(0)
+    #    local_neighs_mask = local_neighs_mask & (scale_rates < SCALE_RATE_THR) \
+    #                        & (scale_rates > 1 / SCALE_RATE_THR)  # (ns, n1)
 
     numn1 = torch.sum(local_neighs_mask, dim=1)
     valid_seeds = numn1 >= MIN_INLIERS
@@ -47,6 +51,7 @@ def extract_neighborhood_sets(o1, o2, s1, s2, dist1, im1seeds, im2seeds, k1, k2,
     return local_neighs_mask, rdims, im1seeds[valid_seeds], im2seeds[valid_seeds]
 
 
+@torch.jit.script
 def extract_local_patterns(fnn12, fnn_to_seed_local_consistency_map_corr, k1, k2, im1seeds, im2seeds, scores):
     ransidx, tokp1 = torch.where(fnn_to_seed_local_consistency_map_corr)
     tokp2 = fnn12[tokp1]
@@ -57,7 +62,7 @@ def extract_local_patterns(fnn12, fnn_to_seed_local_consistency_map_corr, k1, k2
     im1loc = im1abspattern - k1[im1seeds[ransidx]]
     im2loc = im2abspattern - k2[im2seeds[ransidx]]
 
-    expanded_local_scores = scores[tokp1] + ransidx.type(scores.dtype)
+    expanded_local_scores = scores[tokp1] + ransidx.float() #.type(scores.dtype)
 
     sorting_perm = torch.argsort(expanded_local_scores)
 
@@ -68,27 +73,30 @@ def extract_local_patterns(fnn12, fnn_to_seed_local_consistency_map_corr, k1, k2
 
     return im1loc, im2loc, ransidx, tokp1, tokp2
 
-def adalam_core(k1, k2, fnn12, scores1, config, mnn=None, im1shape=None, im2shape=None, o1=None, o2=None, s1=None, s2=None):
-    AREA_RATIO = config['area_ratio']
-    SEARCH_EXP = config['search_expansion']
-    RANSAC_ITERS = config['ransac_iters']
-    MIN_INLIERS = config['min_inliers']
-    MIN_CONF = config['min_confidence']
-    ORIENTATION_THR = config['orientation_difference_threshold']
-    SCALE_RATE_THR = config['scale_rate_threshold']
-    REFIT = config['refit']
+@torch.jit.script
+def adalam_core(k1 : torch.Tensor, k2 : torch.Tensor, fnn12 : torch.Tensor,
+                scores1 : torch.Tensor, mnn : torch.Tensor,
+                im1shape : Tuple[int, int], im2shape : Tuple[int, int],
+                AREA_RATIO: int,
+                SEARCH_EXP: int,
+                RANSAC_ITERS: int,
+                MIN_INLIERS: int,
+                MIN_CONF: int,
+                REFIT: bool,
+                DET_THR: int,
+                MIN_CONFIDENCE: int):
 
-    if im1shape is None:
-        k1mins, _ = torch.min(k1, dim=0)
-        k1maxs, _ = torch.max(k1, dim=0)
-        im1shape = (k1maxs - k1mins).cpu().numpy()
-    if im2shape is None:
-        k2mins, _ = torch.min(k2, dim=0)
-        k2maxs, _ = torch.max(k2, dim=0)
-        im2shape = (k2maxs - k2mins).cpu().numpy()
+    #if im1shape is None:
+    #    k1mins, _ = torch.min(k1, dim=0)
+    #    k1maxs, _ = torch.max(k1, dim=0)
+    #    im1shape = (k1maxs - k1mins).cpu().numpy()
+    #if im2shape is None:
+    #    k2mins, _ = torch.min(k2, dim=0)
+    #    k2maxs, _ = torch.max(k2, dim=0)
+    #    im2shape = (k2maxs - k2mins).cpu().numpy()
 
-    R1 = np.sqrt(np.prod(im1shape[:2]) / AREA_RATIO / np.pi)
-    R2 = np.sqrt(np.prod(im2shape[:2]) / AREA_RATIO / np.pi)
+    R1 = math.sqrt((im1shape[0] * im1shape[1]) / AREA_RATIO / 3.14159265)
+    R2 = math.sqrt((im2shape[0] * im2shape[1]) / AREA_RATIO / 3.14159265)
 
     n1 = k1.shape[0]
     n2 = k2.shape[0]
@@ -96,11 +104,9 @@ def adalam_core(k1, k2, fnn12, scores1, config, mnn=None, im1shape=None, im2shap
     dist1 = dist_matrix(k1, k1)
     im1seeds, im2seeds = select_seeds(dist1, R1, scores1, n1, fnn12, mnn)
 
-    local_neighs_mask, rdims, im1seeds, im2seeds = extract_neighborhood_sets(o1, o2, s1, s2, dist1,
+    local_neighs_mask, rdims, im1seeds, im2seeds = extract_neighborhood_sets(dist1,
                                                                              im1seeds, im2seeds,
                                                                              k1, k2, R1, R2, fnn12,
-                                                                             ORIENTATION_THR,
-                                                                             SCALE_RATE_THR,
                                                                              SEARCH_EXP, MIN_INLIERS)
 
     if rdims.shape[0] == 0:
@@ -116,12 +122,13 @@ def adalam_core(k1, k2, fnn12, scores1, config, mnn=None, im1shape=None, im2shap
     im1loc = im1loc / (R1 * SEARCH_EXP)
     im2loc = im2loc / (R2 * SEARCH_EXP)
 
-    inlier_idx, _, \
-    inl_count_sign, inlier_counts = ransac(xsamples=im1loc,
-                                           ysamples=im2loc,
-                                           rdims=rdims, iters=RANSAC_ITERS,
-                                           refit=REFIT, config=config)
+    #NOTE: can convert & run up to this point; the below converts but crashes as runtime, with
+    # an error about "RuntimeError: "reciprocal_cpu" not implemented for
+    # 'Long'"
 
+    inlier_idx, _, inl_count_sign, inlier_counts = ransac(im1loc, im2loc, rdims,
+                                                          DET_THR, MIN_CONFIDENCE,
+                                                          iters=RANSAC_ITERS, refit=REFIT)
 
     ics = inl_count_sign[ransidx[inlier_idx]]
     ica = inlier_counts[ransidx[inlier_idx]].float()
@@ -135,7 +142,7 @@ def adalam_core(k1, k2, fnn12, scores1, config, mnn=None, im1shape=None, im2shap
 
     # absolute_im1idx = torch.cat([absolute_im1idx, im1seeds[inlier_seeds_idx]])
     # absolute_im2idx = torch.cat([absolute_im2idx, im2seeds[inlier_seeds_idx]])
-    
+
     final_matches = torch.stack([absolute_im1idx, absolute_im2idx], dim=1)
     if final_matches.shape[0] > 1:
         return torch.unique(final_matches, dim=0)
