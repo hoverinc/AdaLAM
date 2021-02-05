@@ -113,7 +113,8 @@ def adalam_core(k1 : torch.Tensor, k2 : torch.Tensor, fnn12 : torch.Tensor,
         # No seed point survived. Just output ratio-test matches. This should happen very rarely.
         absolute_im1idx = torch.where(scores1 < 0.8 ** 2)[0]
         absolute_im2idx = fnn12[absolute_im1idx]
-        return torch.stack([absolute_im1idx, absolute_im2idx], dim=1)
+        nonseed_matches = torch.stack([absolute_im1idx, absolute_im2idx], dim=1)
+        return nonseed_matches
 
     im1loc, im2loc, ransidx, tokp1, tokp2 = extract_local_patterns(fnn12,
                                                                    local_neighs_mask,

@@ -49,19 +49,21 @@ def confidence_based_inlier_selection(residuals : torch.Tensor, ransidx : torch.
 
     balanced_rdims, cumsum_scores, shift_end = group_sum_and_cumsum(inlier_weights, end_rans_indexing) #, ransidx)
     weights_cumsums = cumsum_scores - shift_end[:, ransidx]
-    progressive_inl_rates = weights_cumsums / (balanced_rdims.repeat_interleave(rdims, dim=1)).float()
+    progressive_inl_rates = weights_cumsums / (torch.repeat_interleave(balanced_rdims, rdims, dim=1)).float()
 
     good_inl_mask = (sorted_res_sqr * min_confidence <= progressive_inl_rates) | too_perfect_fits
 
-    inlier_weights[~good_inl_mask] = 0.
-    inlier_counts_matrix, _, _ = group_sum_and_cumsum(inlier_weights, end_rans_indexing)
+    inlier_weights_n = inlier_weights * good_inl_mask
+    inlier_counts_matrix, _, _ = group_sum_and_cumsum(inlier_weights_n, end_rans_indexing)
 
     inl_counts, inl_iters = torch.max(inlier_counts_matrix.long(), dim=0)
+    idx0 = torch.repeat_interleave(inl_iters, inl_counts)
 
     relative_inl_idxes = arange_sequence(inl_counts)
-    inl_ransidx = torch.arange(numransacs).repeat_interleave(inl_counts)
-    inl_sampleidx = sorting_idxes[inl_iters.repeat_interleave(inl_counts),
-                                  idxoffsets[inl_ransidx] + relative_inl_idxes]
+    inl_ransidx = torch.repeat_interleave(torch.arange(numransacs), inl_counts)
+    idx1 = idxoffsets[inl_ransidx] + relative_inl_idxes
+
+    inl_sampleidx = sorting_idxes[idx0, idx1]
     highest_accepted_sqr_residuals = sorted_res_sqr[inl_iters, idxoffsets + inl_counts - 1]
     expected_extra_inl = balanced_rdims[inl_iters, torch.arange(numransacs)].float() * highest_accepted_sqr_residuals
     return inl_ransidx, inl_sampleidx, inl_counts, inl_iters, 1.-expected_extra_inl/inl_counts.float()
@@ -87,7 +89,7 @@ def ransac(xsamples: torch.Tensor,
 
     numransacs = rdims.shape[0]
     numsamples = xsamples.shape[0]
-    ransidx = torch.arange(numransacs).repeat_interleave(rdims)
+    ransidx = torch.repeat_interleave(torch.arange(numransacs), rdims)
     idxoffsets = torch.cat([torch.tensor([0]), torch.cumsum(rdims[:-1], dim=0)], dim=0)
 
     rand_samples_rel = draw_first_k_couples(iters, rdims)
@@ -136,7 +138,7 @@ def ransac(xsamples: torch.Tensor,
     refit_affinity[bad_ones] = torch.eye(2)
     y_pred = (refit_affinity[ransidx] @ xsamples.unsqueeze(-1)).squeeze(-1)
 
-    residuals = torch.norm(y_pred - ysamples, dim=-1)[None,...]#.unsqueeze(0)
+    residuals = torch.norm(y_pred - ysamples, dim=-1).unsqueeze(0)
 
     inl_ransidx, inl_sampleidx, \
     inl_counts, inl_iters, comp_inl_counts = confidence_based_inlier_selection(residuals, ransidx,
