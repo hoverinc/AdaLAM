@@ -1,8 +1,9 @@
+from typing import Tuple
 import torch
 import math
 #import numpy as np
 
-def arange_sequence(ranges):
+def arange_sequence(ranges: torch.Tensor) -> torch.Tensor:
     """
     returns a sequence of the ranges specified by the argument.
     Example:
@@ -33,7 +34,7 @@ def orientation_diff(o1, o2):
     return diff
 
 
-def piecewise_arange(piecewise_idxer):
+def piecewise_arange(piecewise_idxer: torch.Tensor) -> torch.Tensor:
     """
     count repeated indices
     Example:
@@ -51,7 +52,7 @@ def piecewise_arange(piecewise_idxer):
     return ranges[tmp]
 
 
-def batch_2x2_inv(m: torch.Tensor, check_dets: bool=False):
+def batch_2x2_inv(m: torch.Tensor, check_dets: bool=False) -> torch.Tensor:
     a = m[..., 0, 0]
     b = m[..., 0, 1]
     c = m[..., 1, 0]
@@ -83,7 +84,7 @@ def batch_2x2_det(m):
     return a * d - b * c
 
 
-def batch_2x2_ellipse(m):
+def batch_2x2_ellipse(m) -> Tuple[torch.Tensor, torch.Tensor]:
     am = m[..., 0, 0]
     bm = m[..., 0, 1]
     cm = m[..., 1, 0]
@@ -108,7 +109,7 @@ def batch_2x2_ellipse(m):
     return eigenvals, eigenvecs
 
 
-def draw_first_k_couples(k: int, rdims: torch.Tensor):
+def draw_first_k_couples(k: int, rdims: torch.Tensor) -> torch.Tensor:
     # exhaustive search over the first n samples:
     # n(n+1)/2 = n2/2 + n/2 couples
     # max n for which we can exhaustively sample with k couples:

@@ -1,23 +1,19 @@
 from .utils import draw_first_k_couples, batch_2x2_inv, batch_2x2_ellipse, arange_sequence, piecewise_arange
 import torch
-from typing import Optional
+from typing import Tuple
 
 @torch.jit.script
-def stable_sort_residuals(residuals, ransidx):
+def stable_sort_residuals(residuals : torch.Tensor, ransidx : torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     logres = torch.log(residuals + 1e-10)
     minlogres = torch.min(logres)
     maxlogres = torch.max(logres)
-
     sorting_score = ransidx.unsqueeze(0).float() + 0.99 * (logres - minlogres) / (maxlogres - minlogres)
-
     sorting_idxes = torch.argsort(sorting_score, dim=-1)  # (niters, numsamples)
-
     iters_range = torch.arange(residuals.shape[0], device=residuals.device)
-
     return residuals[iters_range.unsqueeze(-1), sorting_idxes], sorting_idxes
 
 @torch.jit.script
-def group_sum_and_cumsum(scores_mat, end_group_idx): #, group_idx: torch.Tensor=None):
+def group_sum_and_cumsum(scores_mat : torch.Tensor, end_group_idx : torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     cumulative_scores = torch.cumsum(scores_mat, dim=1)
     ending_cumusums = cumulative_scores[:, end_group_idx]
     shifted_ending_cumusums = torch.cat(
@@ -32,7 +28,8 @@ def group_sum_and_cumsum(scores_mat, end_group_idx): #, group_idx: torch.Tensor=
     #return grouped_sums, None
 
 @torch.jit.script
-def confidence_based_inlier_selection(residuals, ransidx, rdims, idxoffsets, min_confidence: int):
+def confidence_based_inlier_selection(residuals : torch.Tensor, ransidx : torch.Tensor,
+                                      rdims : torch.Tensor, idxoffsets : torch.Tensor, min_confidence: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     numransacs = rdims.shape[0]
     numiters = residuals.shape[0]
 
@@ -46,7 +43,7 @@ def confidence_based_inlier_selection(residuals, ransidx, rdims, idxoffsets, min
     #_, inv_indices, res_dup_counts = torch.unique_consecutive(sorted_res_sqr.half().float(), dim=1, return_counts=True, return_inverse=True)
     _, inv_indices, res_dup_counts = torch.unique_consecutive(sorted_res_sqr.float(), dim=1, return_counts=True, return_inverse=True)
 
-    duplicates_per_sample = res_dup_counts[inv_indices]
+    duplicates_per_sample = res_dup_counts[inv_indices].float()
     inlier_weights = (1./duplicates_per_sample).repeat(numiters, 1)
     inlier_weights[too_perfect_fits] = 0.
 
@@ -59,7 +56,7 @@ def confidence_based_inlier_selection(residuals, ransidx, rdims, idxoffsets, min
     inlier_weights[~good_inl_mask] = 0.
     inlier_counts_matrix, _, _ = group_sum_and_cumsum(inlier_weights, end_rans_indexing)
 
-    inl_counts, inl_iters = torch.max(inlier_counts_matrix, dim=0)
+    inl_counts, inl_iters = torch.max(inlier_counts_matrix.long(), dim=0)
 
     relative_inl_idxes = arange_sequence(inl_counts)
     inl_ransidx = torch.arange(numransacs).repeat_interleave(inl_counts)
@@ -70,7 +67,9 @@ def confidence_based_inlier_selection(residuals, ransidx, rdims, idxoffsets, min
     return inl_ransidx, inl_sampleidx, inl_counts, inl_iters, 1.-expected_extra_inl/inl_counts.float()
 
 @torch.jit.script
-def sample_padded_inliers(xsamples, ysamples, inlier_counts, inl_ransidx, inl_sampleidx, numransacs: int):
+def sample_padded_inliers(xsamples : torch.Tensor, ysamples : torch.Tensor,
+                          inlier_counts : torch.Tensor, inl_ransidx : torch.Tensor,
+                          inl_sampleidx : torch.Tensor, numransacs: int) -> Tuple[torch.Tensor, torch.Tensor]:
     maxinliers = torch.max(inlier_counts).item()
     padded_inlier_x = torch.zeros(size=(numransacs, int(maxinliers), 2))
     padded_inlier_y = torch.zeros(size=(numransacs, int(maxinliers), 2))
@@ -81,7 +80,10 @@ def sample_padded_inliers(xsamples, ysamples, inlier_counts, inl_ransidx, inl_sa
     return padded_inlier_x, padded_inlier_y
 
 @torch.jit.script
-def ransac(xsamples: torch.Tensor, ysamples: torch.Tensor, rdims: torch.Tensor, DET_THR: int, MIN_CONFIDENCE: int, iters: int=128, refit: bool=True):
+def ransac(xsamples: torch.Tensor,
+           ysamples: torch.Tensor,
+           rdims: torch.Tensor,
+           DET_THR: int, MIN_CONFIDENCE: int, iters: int=128, refit: bool=True) -> Tuple[torch.Tensor,torch.Tensor,torch.Tensor,torch.Tensor]:
 
     numransacs = rdims.shape[0]
     numsamples = xsamples.shape[0]
@@ -134,9 +136,9 @@ def ransac(xsamples: torch.Tensor, ysamples: torch.Tensor, rdims: torch.Tensor, 
     refit_affinity[bad_ones] = torch.eye(2)
     y_pred = (refit_affinity[ransidx] @ xsamples.unsqueeze(-1)).squeeze(-1)
 
-    residuals = torch.norm(y_pred - ysamples, dim=-1)
+    residuals = torch.norm(y_pred - ysamples, dim=-1)[None,...]#.unsqueeze(0)
 
     inl_ransidx, inl_sampleidx, \
-    inl_counts, inl_iters, comp_inl_counts = confidence_based_inlier_selection(residuals.unsqueeze(0), ransidx,
+    inl_counts, inl_iters, comp_inl_counts = confidence_based_inlier_selection(residuals, ransidx,
                             rdims, idxoffsets, min_confidence=MIN_CONFIDENCE)
     return inl_sampleidx, refit_affinity, comp_inl_counts, inl_counts
