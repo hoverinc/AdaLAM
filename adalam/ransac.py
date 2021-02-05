@@ -27,6 +27,7 @@ def group_sum_and_cumsum(scores_mat : torch.Tensor, end_group_idx : torch.Tensor
     #    return grouped_sums, grouped_cumsums
     #return grouped_sums, None
 
+
 @torch.jit.script
 def confidence_based_inlier_selection(residuals : torch.Tensor, ransidx : torch.Tensor,
                                       rdims : torch.Tensor, idxoffsets : torch.Tensor, min_confidence: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -54,6 +55,7 @@ def confidence_based_inlier_selection(residuals : torch.Tensor, ransidx : torch.
     good_inl_mask = (sorted_res_sqr * min_confidence <= progressive_inl_rates) | too_perfect_fits
 
     inlier_weights_n = inlier_weights * good_inl_mask
+    #inlier_weights[~good_inl_mask] = 0.
     inlier_counts_matrix, _, _ = group_sum_and_cumsum(inlier_weights_n, end_rans_indexing)
 
     inl_counts, inl_iters = torch.max(inlier_counts_matrix.long(), dim=0)

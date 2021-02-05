@@ -122,11 +122,6 @@ def adalam_core(k1 : torch.Tensor, k2 : torch.Tensor, fnn12 : torch.Tensor,
                                                                    im2seeds, scores1)
     im1loc = im1loc / (R1 * SEARCH_EXP)
     im2loc = im2loc / (R2 * SEARCH_EXP)
-
-    #NOTE: can convert & run up to this point; the below converts but crashes as runtime, with
-    # an error about "RuntimeError: "reciprocal_cpu" not implemented for
-    # 'Long'"
-
     inlier_idx, _, inl_count_sign, inlier_counts = ransac(im1loc, im2loc, rdims,
                                                           DET_THR, MIN_CONFIDENCE,
                                                           iters=RANSAC_ITERS, refit=REFIT)
