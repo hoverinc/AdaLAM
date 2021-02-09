@@ -27,7 +27,8 @@ def extract_neighborhood_sets(dist1: torch.Tensor, im1seeds: torch.Tensor, im2se
                               k1: torch.Tensor, k2: torch.Tensor, R1: float, R2: float, fnn12: torch.Tensor,
                               SEARCH_EXP: int, MIN_INLIERS: int):
     dst1 = dist1[im1seeds, :]
-    dst2 = dist_matrix(k2[fnn12[im1seeds]], k2[fnn12])
+    #TODO: testing for an error that only shows up on-device
+    dst2 = dist_matrix(k2[fnn12[im1seeds]].float(), k2[fnn12].float())
     local_neighs_mask = (dst1 < (SEARCH_EXP * R1) ** 2) \
                         & (dst2 < (SEARCH_EXP * R2) ** 2)
 
@@ -101,7 +102,8 @@ def adalam_core(k1 : torch.Tensor, k2 : torch.Tensor, fnn12 : torch.Tensor,
     n1 = k1.shape[0]
     n2 = k2.shape[0]
 
-    dist1 = dist_matrix(k1, k1)
+    #TODO: testing for an error that only shows up on-device
+    dist1 = dist_matrix(k1.float(), k1.float())
     im1seeds, im2seeds = select_seeds(dist1, R1, scores1, n1, fnn12, mnn)
 
     local_neighs_mask, rdims, im1seeds, im2seeds = extract_neighborhood_sets(dist1,
