@@ -55,6 +55,7 @@ def confidence_based_inlier_selection(residuals, ransidx, rdims, idxoffsets, dv,
     inlier_counts_matrix, _ = group_sum_and_cumsum(inlier_weights, end_rans_indexing)
 
     inl_counts, inl_iters = torch.max(inlier_counts_matrix, dim=0)
+    inl_counts = inl_counts.long()
 
     relative_inl_idxes = arange_sequence(inl_counts)
     inl_ransidx = torch.arange(numransacs, device=dv).repeat_interleave(inl_counts)
